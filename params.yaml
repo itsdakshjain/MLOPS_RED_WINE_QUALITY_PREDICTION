@@ -9,6 +9,18 @@ DataTransformation:
     method: standard
     save_scaler_path: artifacts/data_transformation/scaler.joblib
 
+Preprocessing:
+  use_scaler: true
+  scaler_type: standard
+  handle_outliers: true
+  outlier_method: iqr
+  outlier_iqr_multiplier: 1.5
+  impute_missing: true
+  feature_engineering_flags:
+    add_acidity_index: true
+    add_alcohol_sugar_ratio: true
+    add_free_sulfur_pct: true
+
 ElasticNet:
   alpha: 0.2
   l1_ratio: 0.1

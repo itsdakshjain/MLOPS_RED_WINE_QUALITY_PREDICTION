@@ -54,3 +54,4 @@ class ModelEvaluation:
         
         scores = {"rmse": rmse, "mae": mae, "r2": r2}
         save_json(path=Path(self.config.metric_file_name), data=scores)
+        logger.info(f"Evaluation metrics saved: RMSE={rmse:.4f}, MAE={mae:.4f}, R2={r2:.4f}")

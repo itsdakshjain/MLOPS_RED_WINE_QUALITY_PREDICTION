@@ -31,6 +31,12 @@ class DataTransformationConfig:
     stratify_column: Optional[str]
     use_scaler: bool = True
     scaler_type: str = "standard"
+    handle_outliers: bool = True
+    outlier_method: str = "iqr"
+    outlier_iqr_multiplier: float = 1.5
+    impute_missing: bool = True
+    feature_engineering_flags: Optional[dict] = None
+    preprocessor_path: Optional[Path] = None
     override_root_dir: Optional[Path] = None
     override_test_size: Optional[float] = None
 

@@ -1,9 +1,13 @@
 import os
 import joblib
+import numpy as np
 from mlProject import logger
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 import pandas as pd
 from mlProject.entity.config_entity import DataTransformationConfig
 
@@ -15,38 +19,106 @@ NUMERIC_FEATURES = [
 ]
 
 
-class FeatureScaler:
-    def __init__(self, save_path: str):
-        self.save_path = save_path
-        self.pipeline = Pipeline([
-            ("scaler", StandardScaler()),
-        ])
+class OutlierCapper(BaseEstimator, TransformerMixin):
+    """Cap outliers using IQR-based capping or percentile-based capping."""
+    def __init__(self, method: str = "iqr", iqr_multiplier: float = 1.5):
+        self.method = method
+        self.iqr_multiplier = iqr_multiplier
+        self.lower_bounds = {}
+        self.upper_bounds = {}
 
-    def fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        scaled = self.pipeline.fit_transform(X[NUMERIC_FEATURES])
-        result = X.copy()
-        result[NUMERIC_FEATURES] = scaled
-        joblib.dump(self.pipeline, self.save_path)
-        logger.info(f"Feature scaler saved to {self.save_path}")
-        return result
+    def fit(self, X, y=None):
+        X_arr = np.asarray(X)
+        for i in range(X_arr.shape[1]):
+            col = X_arr[:, i]
+            q1, q3 = np.percentile(col, [25, 75])
+            iqr = q3 - q1
+            self.lower_bounds[i] = q1 - self.iqr_multiplier * iqr
+            self.upper_bounds[i] = q3 + self.iqr_multiplier * iqr
+        return self
 
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        scaled = self.pipeline.transform(X[NUMERIC_FEATURES])
-        result = X.copy()
-        result[NUMERIC_FEATURES] = scaled
-        return result
+    def transform(self, X):
+        X_arr = np.asarray(X, dtype=float)
+        for i in range(X_arr.shape[1]):
+            X_arr[:, i] = np.clip(X_arr[:, i], self.lower_bounds.get(i, -np.inf), self.upper_bounds.get(i, np.inf))
+        return X_arr
+
+
+class FeatureEngineer(BaseEstimator, TransformerMixin):
+    """Add derived features: acidity_index, alcohol_sugar_ratio, free_sulfur_pct."""
+    def __init__(self, add_acidity_index=True, add_alcohol_sugar_ratio=True, add_free_sulfur_pct=True):
+        self.add_acidity_index = add_acidity_index
+        self.add_alcohol_sugar_ratio = add_alcohol_sugar_ratio
+        self.add_free_sulfur_pct = add_free_sulfur_pct
+        self.n_features_in_ = len(NUMERIC_FEATURES)
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X_arr = np.asarray(X, dtype=float)
+        additional = []
+        if self.add_acidity_index and X_arr.shape[1] >= 9:
+            fixed = X_arr[:, 0]
+            ph = X_arr[:, 8]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                idx = np.where(ph > 0, fixed / ph, 0)
+            additional.append(idx)
+        if self.add_alcohol_sugar_ratio and X_arr.shape[1] >= 11:
+            alcohol = X_arr[:, 10]
+            sugar = X_arr[:, 3]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = np.where(sugar > 0, alcohol / sugar, 0)
+            additional.append(ratio)
+        if self.add_free_sulfur_pct and X_arr.shape[1] >= 7:
+            free_sulfur = X_arr[:, 5]
+            total_sulfur = X_arr[:, 6]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                pct = np.where(total_sulfur > 0, free_sulfur / total_sulfur * 100, 0)
+            additional.append(pct)
+        if additional:
+            return np.column_stack([X_arr] + additional)
+        return X_arr
+
+    def get_feature_names_out(self, input_features=None):
+        names = list(NUMERIC_FEATURES)
+        if self.add_acidity_index:
+            names.append("acidity_index")
+        if self.add_alcohol_sugar_ratio:
+            names.append("alcohol_sugar_ratio")
+        if self.add_free_sulfur_pct:
+            names.append("free_sulfur_pct")
+        return names
 
 
 class DataTransformation:
     def __init__(self, config: DataTransformationConfig):
         self.config = config
 
-    
-    ## Note: You can add different data transformation techniques such as Scaler, PCA and all
-    #You can perform all kinds of EDA in ML cycle here before passing this data to the model
+    def _build_preprocessing_pipeline(self):
+        """Build a full preprocessing pipeline with imputation, scaling, outlier capping, and feature engineering."""
+        scaler_map = {
+            "standard": StandardScaler(),
+            "robust": RobustScaler(),
+            "minmax": MinMaxScaler(),
+        }
+        scaler = scaler_map.get(self.config.scaler_type, StandardScaler())
 
-    # I am only adding train_test_spliting cz this data is already cleaned up
+        numeric_transformer = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", scaler),
+            ("outlier_capper", OutlierCapper(method="iqr", iqr_multiplier=1.5)),
+        ])
 
+        preprocessor = Pipeline(steps=[
+            ("numeric", numeric_transformer),
+            ("feature_engineer", FeatureEngineer(
+                add_acidity_index=True,
+                add_alcohol_sugar_ratio=True,
+                add_free_sulfur_pct=True,
+            )),
+        ])
+        return preprocessor
 
     def train_test_spliting(self):
         try:
@@ -90,21 +162,48 @@ class DataTransformation:
                 random_state=self.config.random_state,
             )
 
-        scaler_save_path = os.path.join(self.config.root_dir, "scaler.joblib")
-        scaler = FeatureScaler(scaler_save_path)
-        train = scaler.fit_transform(train)
-        test = scaler.transform(test)
+        if self.config.use_scaler:
+            preprocessor = self._build_preprocessing_pipeline()
+            train_features = train[NUMERIC_FEATURES]
+            test_features = test[NUMERIC_FEATURES]
+            train_target = train[[self.config.stratify_column]] if self.config.stratify_column in train.columns else None
+            test_target = test[[self.config.stratify_column]] if self.config.stratify_column in test.columns else None
+
+            train_scaled = preprocessor.fit_transform(train_features)
+            test_scaled = preprocessor.transform(test_features)
+
+            try:
+                feat_names = preprocessor.named_steps["feature_engineer"].get_feature_names_out()
+            except Exception:
+                feat_names = [f"feat_{i}" for i in range(train_scaled.shape[1])]
+
+            train_scaled_df = pd.DataFrame(train_scaled, columns=feat_names)
+            test_scaled_df = pd.DataFrame(test_scaled, columns=feat_names)
+
+            if train_target is not None:
+                train_scaled_df[self.config.stratify_column] = train_target.values
+                test_scaled_df[self.config.stratify_column] = test_target.values
+
+            train_result = train_scaled_df
+            test_result = test_scaled_df
+
+            preprocessor_path = os.path.join(self.config.root_dir, "preprocessor.joblib")
+            joblib.dump(preprocessor, preprocessor_path)
+            logger.info(f"Preprocessing pipeline saved to {preprocessor_path}")
+        else:
+            train_result = train
+            test_result = test
 
         try:
-            train.to_csv(os.path.join(self.config.root_dir, "train.csv"), index=False)
-            test.to_csv(os.path.join(self.config.root_dir, "test.csv"), index=False)
+            train_result.to_csv(os.path.join(self.config.root_dir, "train.csv"), index=False)
+            test_result.to_csv(os.path.join(self.config.root_dir, "test.csv"), index=False)
         except OSError as e:
             logger.error(f"Failed to write train/test CSV files: {e}")
             raise
 
         logger.info("Splited data into training and test sets")
-        logger.info(train.shape)
-        logger.info(test.shape)
+        logger.info(train_result.shape)
+        logger.info(test_result.shape)
 
-        print(train.shape)
-        print(test.shape)
+        print(train_result.shape)
+        print(test_result.shape)
