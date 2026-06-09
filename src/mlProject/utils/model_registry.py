@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -37,8 +38,10 @@ def save_registry(registry_path: Path, registry: dict):
 
 
 def get_version_id() -> str:
-    """Generate a version ID based on current timestamp."""
-    return f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    """Generate a globally unique version ID using timestamp and UUID."""
+    ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    suffix = uuid.uuid4().hex[:8]
+    return f"v{ts}_{suffix}"
 
 
 def register_model(
@@ -53,6 +56,10 @@ def register_model(
 ) -> dict:
     """Register a model version and enforce quality gates."""
     registry = load_registry(registry_path)
+
+    for v in registry.get("versions", []):
+        if v.get("id") == version_id:
+            raise ValueError(f"Version ID {version_id} already exists in registry")
 
     current_production = registry.get("production")
     previous_metrics = None
@@ -105,7 +112,14 @@ def register_model(
         archived = registry["versions"][max_versions_to_keep:]
         registry["versions"] = registry["versions"][:max_versions_to_keep]
         for v in archived:
-            logger.info(f"Archived old version: {v['id']}")
+            archived_path = Path(v["path"])
+            if archived_path.exists():
+                archived_path.unlink()
+                logger.info(f"Deleted archived model file: {archived_path}")
+            sha_path = Path(str(archived_path) + ".sha256")
+            if sha_path.exists():
+                sha_path.unlink()
+                logger.info(f"Deleted archived checksum: {sha_path}")
 
     save_registry(registry_path, registry)
     return entry

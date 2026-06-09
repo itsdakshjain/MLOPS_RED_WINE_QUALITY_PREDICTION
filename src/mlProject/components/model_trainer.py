@@ -72,6 +72,8 @@ class ModelTrainer:
                 params=params,
                 data_hash=data_hash,
             )
+        except ValueError as e:
+            logger.error(f"Model registry rejected version {version_id}: {e}")
         except Exception as e:
             logger.warning(f"Failed to register model in registry: {e}")
 
