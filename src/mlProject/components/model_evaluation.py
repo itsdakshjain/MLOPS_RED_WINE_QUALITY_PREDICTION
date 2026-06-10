@@ -22,7 +22,14 @@ class ModelEvaluation:
         r2 = r2_score(actual, pred)
         return rmse, mae, r2
     
-
+    def baseline_r2_score(self, actual):
+        """
+        Calculate the R² score for a naive baseline model that always predicts the mean.
+        R² < 0 indicates the model performs worse than predicting the mean.
+        """
+        mean_pred = np.full_like(actual, np.mean(actual))
+        baseline_r2 = r2_score(actual, mean_pred)
+        return baseline_r2
 
     def save_results(self):
         try:
@@ -59,10 +66,23 @@ class ModelEvaluation:
 
         (rmse, mae, r2) = self.eval_metrics(test_y, predicted_qualities)
         
-        scores = {"rmse": rmse, "mae": mae, "r2": r2}
+        # Calculate baseline R² (predict-mean strategy)
+        baseline_r2 = self.baseline_r2_score(test_y.values.flatten())
+        
+        # Validate model performance against baseline
+        if r2 < 0.0:
+            logger.error(f"Model R²={r2:.4f} is below baseline (R²=0.0). Aborting deployment.")
+            raise ValueError(f"Model R²={r2:.4f} is below baseline. Aborting.")
+        
+        scores = {
+            "rmse": rmse, 
+            "mae": mae, 
+            "r2": r2,
+            "baseline_r2": baseline_r2
+        }
         save_json(path=Path(self.config.metric_file_name), data=scores)
 
-        logger.info(f"Evaluation metrics saved: RMSE={rmse:.4f}, MAE={mae:.4f}, R2={r2:.4f}")
+        logger.info(f"Evaluation metrics saved: RMSE={rmse:.4f}, MAE={mae:.4f}, R2={r2:.4f}, Baseline R2={baseline_r2:.4f}")
 
         registry_path = self.config.root_dir.parent / "model_registry.json"
         self._update_registry_with_metrics(registry_path, scores)
