@@ -7,6 +7,7 @@ Run with:  pytest tests/test_train_endpoint.py -v
 
 import os
 import threading
+from collections import deque
 import pytest
 
 # Set the env vars BEFORE importing app so the app picks them up
@@ -24,7 +25,7 @@ def reset_training_state():
     import app as application
 
     application.is_training = False
-    application.training_log = []
+    application.training_log.clear()
     # Release the lock if it was acquired by a previous test
     if application._training_lock.locked():
         try:

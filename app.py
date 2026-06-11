@@ -14,6 +14,9 @@ import secrets
 import subprocess
 import sys
 import threading
+import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
  
 import numpy as np
 import pandas as pd
@@ -26,7 +29,7 @@ from mlProject.constants import ENV_FLASK_PORT, ENV_FLASK_DEBUG, ENV_TAG
 from mlProject.pipeline.prediction import PredictionPipeline
 from mlProject.utils.common import load_env_file, get_env_or_config
 from mlProject.utils.model_registry import load_registry, rollback_to_version
- 
+
 load_env_file()
  
 app = Flask(__name__)
@@ -45,10 +48,19 @@ limiter = Limiter(
 # Training state
 # _training_lock is held for the entire duration of a training run.
 # acquire(blocking=False) is atomic - no race condition possible.
+#
+# Memory & thread safety:
+# - training_log is a bounded deque(maxlen=100) to prevent unbounded growth
+# - _log_lock protects all reads/writes to training_log
+# - ThreadPoolExecutor(max_workers=1) replaces raw thread creation
+# - Timeout mechanism auto-releases lock if training exceeds TRAIN_TIMEOUT
 # ---------------------------------------------------------------------------
 _training_lock = threading.Lock()
+_log_lock = threading.Lock()
 is_training = False
-training_log = []
+training_log = deque(maxlen=100)
+_train_executor = ThreadPoolExecutor(max_workers=1)
+TRAIN_TIMEOUT = int(os.environ.get("TRAIN_TIMEOUT", "1800"))  # default 30 min
  
  
 # ---------------------------------------------------------------------------
@@ -102,22 +114,32 @@ def validate_config_at_startup() -> None:
 # ---------------------------------------------------------------------------
 def _run_training_in_background() -> None:
     """Subprocess-based training; releases _training_lock when done."""
-    global is_training, training_log
+    global is_training
+    start_time = time.time()
     try:
-        training_log.append("Training started...")
+        with _log_lock:
+            training_log.append("Training started...")
         result = subprocess.run(
             ["python", "main.py"],
             capture_output=True,
             text=True,
+            timeout=TRAIN_TIMEOUT,
         )
-        if result.returncode == 0:
-            training_log.append("Training completed successfully!")
-            training_log.append(result.stdout)
-        else:
-            training_log.append("Training failed!")
-            training_log.append(result.stderr or result.stdout)
+        with _log_lock:
+            if result.returncode == 0:
+                training_log.append("Training completed successfully!")
+                training_log.append(result.stdout)
+            else:
+                training_log.append("Training failed!")
+                training_log.append(result.stderr or result.stdout)
+    except subprocess.TimeoutExpired:
+        with _log_lock:
+            training_log.append(
+                f"Training timed out after {TRAIN_TIMEOUT}s"
+            )
     except Exception as exc:
-        training_log.append(f"Training error: {exc}")
+        with _log_lock:
+            training_log.append(f"Training error: {exc}")
     finally:
         is_training = False
         try:
@@ -170,12 +192,12 @@ def homePage():
 @app.route("/train", methods=["GET"])
 @limiter.limit("10 per hour")           # Hard cap: 10 triggers/hr per IP
 def training():
-    global is_training, training_log
- 
+    global is_training
+
     # 1 - Authenticate first (401 reveals nothing about current state)
     if not _verify_train_token():
         abort(401)
- 
+
     # 2 - Atomically acquire the lock; reject if already running
     acquired = _training_lock.acquire(blocking=False)
     if not acquired:
@@ -184,13 +206,15 @@ def training():
             training_success=None,
             training_log="Training is already in progress! Please wait...",
         )
- 
-    # 3 - Mark running and spawn daemon thread (won't block shutdown)
+
+    # 3 - Mark running and reset log buffer under lock
     is_training = True
-    training_log = []
-    thread = threading.Thread(target=_run_training_in_background, daemon=True)
-    thread.start()
- 
+    with _log_lock:
+        training_log.clear()
+
+    # 4 - Submit to ThreadPoolExecutor (reuses worker thread, avoids thread leak)
+    _train_executor.submit(_run_training_in_background)
+
     return render_template(
         "train_status.html",
         training_success=True,
@@ -204,10 +228,13 @@ def training_status():
     """Return current training state. Also requires the token."""
     if not _verify_train_token():
         abort(401)
- 
+
+    with _log_lock:
+        log_snapshot = list(training_log)
+
     return jsonify({
         "is_training": is_training,
-        "log": training_log,
+        "log": log_snapshot,
     })
  
  
