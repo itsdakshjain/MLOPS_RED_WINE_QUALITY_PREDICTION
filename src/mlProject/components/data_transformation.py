@@ -24,23 +24,23 @@ class OutlierCapper(BaseEstimator, TransformerMixin):
     def __init__(self, method: str = "iqr", iqr_multiplier: float = 1.5):
         self.method = method
         self.iqr_multiplier = iqr_multiplier
-        self.lower_bounds = {}
-        self.upper_bounds = {}
 
     def fit(self, X, y=None):
         X_arr = np.asarray(X)
+        self.lower_bounds_ = {}
+        self.upper_bounds_ = {}
         for i in range(X_arr.shape[1]):
             col = X_arr[:, i]
             q1, q3 = np.percentile(col, [25, 75])
             iqr = q3 - q1
-            self.lower_bounds[i] = q1 - self.iqr_multiplier * iqr
-            self.upper_bounds[i] = q3 + self.iqr_multiplier * iqr
+            self.lower_bounds_[i] = q1 - self.iqr_multiplier * iqr
+            self.upper_bounds_[i] = q3 + self.iqr_multiplier * iqr
         return self
 
     def transform(self, X):
         X_arr = np.asarray(X, dtype=float)
         for i in range(X_arr.shape[1]):
-            X_arr[:, i] = np.clip(X_arr[:, i], self.lower_bounds.get(i, -np.inf), self.upper_bounds.get(i, np.inf))
+            X_arr[:, i] = np.clip(X_arr[:, i], self.lower_bounds_.get(i, -np.inf), self.upper_bounds_.get(i, np.inf))
         return X_arr
 
 
@@ -228,26 +228,33 @@ class DataTransformation:
                 train_scaled_df[self.config.stratify_column] = train_target.values
                 test_scaled_df[self.config.stratify_column] = test_target.values
 
-            train_result = train_scaled_df
-            test_result = test_scaled_df
-
             preprocessor_path = os.path.join(self.config.root_dir, "preprocessor.joblib")
             joblib.dump(preprocessor, preprocessor_path)
             logger.info(f"Preprocessing pipeline saved to {preprocessor_path}")
+
+            feat_dim = len(NUMERIC_FEATURES)
+            if train_scaled.shape[1] != feat_dim + 3:
+                logger.warning(
+                    f"Preprocessor output dimension {train_scaled.shape[1]} "
+                    f"does not match expected {feat_dim + 3} (features + engineered)"
+                )
         else:
-            train_result = train
-            test_result = test
+            train_scaled_df = None
+            test_scaled_df = None
 
         try:
-            train_result.to_csv(os.path.join(self.config.root_dir, "train.csv"), index=False)
-            test_result.to_csv(os.path.join(self.config.root_dir, "test.csv"), index=False)
+            train.to_csv(os.path.join(self.config.root_dir, "train.csv"), index=False)
+            test.to_csv(os.path.join(self.config.root_dir, "test.csv"), index=False)
+            if self.config.use_scaler and train_scaled_df is not None:
+                train_scaled_df.to_csv(os.path.join(self.config.root_dir, "train_scaled.csv"), index=False)
+                test_scaled_df.to_csv(os.path.join(self.config.root_dir, "test_scaled.csv"), index=False)
         except OSError as e:
             logger.error(f"Failed to write train/test CSV files: {e}")
             raise
 
         logger.info("Splited data into training and test sets")
-        logger.info(train_result.shape)
-        logger.info(test_result.shape)
+        logger.info(f"Train shape: {train.shape}, Test shape: {test.shape}")
+        if self.config.use_scaler:
+            logger.info(f"Scaled train shape: {train_scaled_df.shape}, Scaled test shape: {test_scaled_df.shape}")
 
-        print(train_result.shape)
-        print(test_result.shape)
+        print(f"Train: {train.shape}, Test: {test.shape}")
