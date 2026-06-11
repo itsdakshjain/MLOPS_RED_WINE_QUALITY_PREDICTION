@@ -50,6 +50,7 @@ class ModelTrainerConfig:
     alpha: float
     l1_ratio: float
     target_column: str
+    preprocessor_path: Optional[Path] = None
     override_root_dir: Optional[Path] = None
     override_alpha: Optional[float] = None
     override_l1_ratio: Optional[float] = None
@@ -62,6 +63,7 @@ class ModelEvaluationConfig:
     all_params: dict
     metric_file_name: Path
     target_column: str
+    preprocessor_path: Optional[Path] = None
     override_root_dir: Optional[Path] = None
 
 @dataclass(frozen=True)

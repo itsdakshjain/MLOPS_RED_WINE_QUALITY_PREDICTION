@@ -21,6 +21,9 @@ Preprocessing:
     add_alcohol_sugar_ratio: true
     add_free_sulfur_pct: true
 
+ModelEvaluation:
+  min_r2_threshold: 0.0  # Minimum acceptable R² - below this, model is worse than baseline
+
 ElasticNet:
   alpha: 0.2
   l1_ratio: 0.1

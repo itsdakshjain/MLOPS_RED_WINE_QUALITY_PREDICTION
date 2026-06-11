@@ -20,6 +20,7 @@ stages:
       - src/mlProject/entity/config_entity.py
       - src/mlProject/utils/common.py
       - config/config.yaml
+      - params.yaml
       - schema.yaml
       - artifacts/data_ingestion/winequality-red.csv
     outs:
@@ -34,6 +35,8 @@ stages:
       - src/mlProject/entity/config_entity.py
       - src/mlProject/utils/common.py
       - config/config.yaml
+      - params.yaml
+      - schema.yaml
       - artifacts/data_ingestion/winequality-red.csv
     outs:
       - artifacts/data_transformation/train.csv
@@ -49,6 +52,7 @@ stages:
       - src/mlProject/utils/common.py
       - config/config.yaml
       - params.yaml
+      - schema.yaml
       - artifacts/data_transformation/train.csv
       - artifacts/data_transformation/test.csv
     outs:
@@ -64,6 +68,7 @@ stages:
       - src/mlProject/utils/common.py
       - config/config.yaml
       - params.yaml
+      - schema.yaml
       - artifacts/data_transformation/test.csv
       - artifacts/model_trainer/model.joblib
     metrics:

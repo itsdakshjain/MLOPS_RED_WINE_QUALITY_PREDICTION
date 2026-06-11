@@ -123,6 +123,10 @@ class ConfigurationManager:
         root_dir = get_env_or_config(ENV_MODEL_TRAINER_ROOT_DIR, config.root_dir)
         create_directories([root_dir])
 
+        preprocessor_path = self.config.data_transformation.get("preprocessor_path")
+        if preprocessor_path is None:
+            preprocessor_path = str(Path(self.config.data_transformation.root_dir) / "preprocessor.joblib")
+
         model_trainer_config = ModelTrainerConfig(
             root_dir=Path(root_dir),
             train_data_path=Path(get_env_or_config(ENV_MODEL_TRAINER_TRAIN_DATA_PATH, config.train_data_path)),
@@ -130,7 +134,8 @@ class ConfigurationManager:
             model_name=get_env_or_config(ENV_MODEL_TRAINER_MODEL_NAME, config.model_name),
             alpha=float(get_env_or_config("ENV_ELASTICNET_ALPHA", params.alpha, transform=float)),
             l1_ratio=float(get_env_or_config("ENV_ELASTICNET_L1_RATIO", params.l1_ratio, transform=float)),
-            target_column=schema.name
+            target_column=schema.name,
+            preprocessor_path=Path(preprocessor_path),
         )
 
         return model_trainer_config
@@ -144,13 +149,18 @@ class ConfigurationManager:
         root_dir = get_env_or_config(ENV_MODEL_EVALUATION_ROOT_DIR, config.root_dir)
         create_directories([root_dir])
 
+        preprocessor_path = self.config.data_transformation.get("preprocessor_path")
+        if preprocessor_path is None:
+            preprocessor_path = str(Path(self.config.data_transformation.root_dir) / "preprocessor.joblib")
+
         model_evaluation_config = ModelEvaluationConfig(
             root_dir=Path(root_dir),
             test_data_path=Path(get_env_or_config(ENV_MODEL_EVALUATION_TEST_DATA_PATH, config.test_data_path)),
             model_path=Path(get_env_or_config(ENV_MODEL_EVALUATION_MODEL_PATH, config.model_path)),
             all_params=params,
             metric_file_name=Path(get_env_or_config(ENV_MODEL_EVALUATION_METRIC_FILE_NAME, config.metric_file_name)),
-            target_column=schema.name
+            target_column=schema.name,
+            preprocessor_path=Path(preprocessor_path),
         )
 
         return model_evaluation_config

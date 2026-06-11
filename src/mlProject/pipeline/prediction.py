@@ -6,11 +6,11 @@ from mlProject.components.data_transformation import NUMERIC_FEATURES
 from mlProject.config.configuration import ConfigurationManager
 from mlProject.utils.common import load_env_file
 from mlProject.utils.model_registry import get_production_model_path, load_registry
+from mlProject import logger
 
 class PredictionPipeline:
     def __init__(self, model_path: Path = None):
-        self.model = None
-        self.preprocessor = None
+        self.unified_pipeline = None
         self._model_path = model_path
         if model_path is None:
             load_env_file()
@@ -25,34 +25,32 @@ class PredictionPipeline:
                 self._model_path = Path('artifacts/model_trainer/model.joblib')
 
     def predict(self, data):
-        if self.model is None:
+        if self.unified_pipeline is None:
             model_path = self._model_path or Path('artifacts/model_trainer/model.joblib')
             from mlProject.utils.common import verify_model_integrity
             checksum_path = Path(str(model_path) + ".sha256")
             if not verify_model_integrity(model_path, checksum_path):
                 raise ValueError(f"Model integrity check failed for {model_path}")
-            self.model = joblib.load(model_path)
-        if self.preprocessor is None:
-            preprocessor_path = Path('artifacts/data_transformation/preprocessor.joblib')
-            if preprocessor_path.exists():
-                self.preprocessor = joblib.load(preprocessor_path)
+            self.unified_pipeline = joblib.load(model_path)
+            logger.info(f"Loaded unified pipeline from {model_path}")
 
+        # Convert input to appropriate format
         if isinstance(data, np.ndarray):
-            if self.preprocessor is not None:
-                processed = self.preprocessor.transform(data)
-            else:
-                processed = data
+            input_data = data
         elif isinstance(data, pd.DataFrame):
-            if self.preprocessor is not None:
-                try:
-                    numeric_data = data[NUMERIC_FEATURES]
-                except (KeyError, ValueError):
-                    numeric_data = data
-                processed = self.preprocessor.transform(numeric_data)
-            else:
-                processed = data.values
+            try:
+                input_data = data[NUMERIC_FEATURES].values
+            except (KeyError, ValueError):
+                input_data = data.values
         else:
-            processed = data
+            input_data = data
 
-        prediction = self.model.predict(processed)
+        # Unified pipeline handles preprocessing (if available) and prediction
+        try:
+            prediction = self.unified_pipeline.predict(input_data)
+        except TypeError as e:
+            # If unified_pipeline is just a model without preprocessor
+            logger.warning(f"Pipeline prediction failed: {e}. Attempting direct model prediction.")
+            prediction = self.unified_pipeline.predict(input_data)
+        
         return prediction

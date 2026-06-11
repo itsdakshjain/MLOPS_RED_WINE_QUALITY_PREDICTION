@@ -1,5 +1,6 @@
 from collections import namedtuple
 from scipy.stats import ks_2samp
+from pathlib import Path
 
 from mlProject import logger
 import pandas as pd
@@ -77,7 +78,20 @@ class DataValidator:
             raise
 
         schema_valid, schema_errors = self.schema_validator.validate(data)
-        drift_detected, drift_scores = self.drift_detector.detect(data, data)
+        
+        # Load reference data (training distribution) for drift detection
+        reference_data = data
+        reference_data_path = Path("artifacts") / "reference_data.csv"
+        if reference_data_path.exists():
+            try:
+                reference_data = pd.read_csv(reference_data_path)
+                logger.info(f"Loaded reference data from {reference_data_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load reference data from {reference_data_path}: {e}. Using current data as reference.")
+        else:
+            logger.warning(f"Reference data not found at {reference_data_path}. Using current data as reference.")
+        
+        drift_detected, drift_scores = self.drift_detector.detect(reference_data, data)
 
         all_errors = list(schema_errors)
         validation_status = schema_valid and not drift_detected

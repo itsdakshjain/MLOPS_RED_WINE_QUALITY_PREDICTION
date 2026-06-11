@@ -43,6 +43,10 @@ stages:
       hash: md5
       md5: 909ecb43bc296b4e9ba00e5bd011f2c6
       size: 1008
+    - path: params.yaml
+      hash: md5
+      md5: 48a14291a564ca8f58bdb78825357c48
+      size: 578
     - path: schema.yaml
       hash: md5
       md5: 5e46b43f4005ecea7de7ae41fea7f397
@@ -83,6 +87,14 @@ stages:
       hash: md5
       md5: 909ecb43bc296b4e9ba00e5bd011f2c6
       size: 1008
+    - path: params.yaml
+      hash: md5
+      md5: 48a14291a564ca8f58bdb78825357c48
+      size: 578
+    - path: schema.yaml
+      hash: md5
+      md5: 5e46b43f4005ecea7de7ae41fea7f397
+      size: 333
     - path: src/mlProject/components/data_transformation.py
       hash: md5
       md5: c37b68f3143ec46139530854e9b17e11
@@ -131,6 +143,10 @@ stages:
       hash: md5
       md5: 4607fbf987fdf2e49eb9747293a35307
       size: 42
+    - path: schema.yaml
+      hash: md5
+      md5: 5e46b43f4005ecea7de7ae41fea7f397
+      size: 333
     - path: src/mlProject/components/model_trainer.py
       hash: md5
       md5: b7ada0f3f3a77ef33435e4c03ff5f6cb
@@ -175,6 +191,10 @@ stages:
       hash: md5
       md5: 4607fbf987fdf2e49eb9747293a35307
       size: 42
+    - path: schema.yaml
+      hash: md5
+      md5: 5e46b43f4005ecea7de7ae41fea7f397
+      size: 333
     - path: src/mlProject/components/model_evaluation.py
       hash: md5
       md5: 5e810966a5d6069ef5fe63b30dfa7740

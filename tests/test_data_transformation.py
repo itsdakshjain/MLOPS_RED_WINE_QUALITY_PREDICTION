@@ -68,6 +68,32 @@ class TestPreprocessing(unittest.TestCase):
         self.assertIn("alcohol_sugar_ratio", fe_names)
         self.assertIn("free_sulfur_pct", fe_names)
 
+    def test_derived_features_mathematically_correct(self):
+        data = np.array([
+            [7.4, 0.7, 0.0, 1.9, 0.076, 11.0, 34.0, 0.9978, 3.51, 0.56, 9.4],
+            [7.8, 0.88, 0.0, 2.6, 0.098, 25.0, 67.0, 0.9968, 3.20, 0.68, 9.8],
+        ], dtype=float)
+        fe = FeatureEngineer(
+            add_acidity_index=True,
+            add_alcohol_sugar_ratio=True,
+            add_free_sulfur_pct=True,
+        )
+        transformed = fe.fit_transform(data)
+        # acidity_index = fixed_acidity / pH
+        expected_acidity = data[:, 0] / data[:, 8]
+        np.testing.assert_array_almost_equal(transformed[:, 11], expected_acidity)
+        # alcohol_sugar_ratio = alcohol / residual_sugar
+        expected_ratio = data[:, 10] / data[:, 3]
+        np.testing.assert_array_almost_equal(transformed[:, 12], expected_ratio)
+        # free_sulfur_pct = free_sulfur_dioxide / total_sulfur_dioxide * 100
+        expected_pct = data[:, 5] / data[:, 6] * 100
+        np.testing.assert_array_almost_equal(transformed[:, 13], expected_pct)
+
+    def test_feature_engineer_raises_on_missing_column(self):
+        fe = FeatureEngineer(add_acidity_index=True)
+        with self.assertRaises(ValueError):
+            fe.fit(np.array([[1.0, 2.0, 3.0]]))
+
     def test_outlier_capper_clips_extreme_values(self):
         data = np.array([[1.0, 1000.0], [2.0, 3.0], [3.0, 4.0], [4.0, 5.0]], dtype=float)
         capper = OutlierCapper(method="iqr", iqr_multiplier=1.5)
