@@ -1,3 +1,4 @@
+import json
 import os
 import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -7,7 +8,9 @@ import joblib
 from mlProject import logger
 from mlProject.entity.config_entity import ModelEvaluationConfig
 from mlProject.utils.common import save_json
-from mlProject.utils.model_registry import load_registry, save_registry
+from mlProject.utils.model_registry import (
+    load_registry, register_model,
+)
 from mlProject.components.data_transformation import NUMERIC_FEATURES
 from pathlib import Path
 
@@ -104,7 +107,27 @@ class ModelEvaluation:
         logger.info(f"Evaluation metrics saved: RMSE={rmse:.4f}, MAE={mae:.4f}, R2={r2:.4f}, Baseline R2={baseline_r2:.4f}")
 
         registry_path = self.config.root_dir.parent / "model_registry.json"
-        self._update_registry_with_metrics(registry_path, scores)
+
+        model_info = self._load_model_info()
+        version_id = model_info.get("version_id") if model_info else None
+        if not version_id:
+            from mlProject.utils.model_registry import get_version_id
+            version_id = get_version_id()
+            logger.warning(f"Could not read version_id from model_info, generated new: {version_id}")
+
+        params = model_info.get("params", {}) if model_info else {}
+        data_hash = model_info.get("data_hash", "") if model_info else ""
+
+        versioned_model_path = model_info.get("model_path") if model_info else str(self.config.model_path)
+
+        register_model(
+            registry_path=registry_path,
+            model_path=Path(versioned_model_path),
+            version_id=version_id,
+            metrics=scores,
+            params=params,
+            data_hash=data_hash,
+        )
 
         previous_metrics = self._load_previous_metrics(registry_path)
         if previous_metrics:
@@ -112,6 +135,20 @@ class ModelEvaluation:
             comparison_path = self.config.root_dir / "metrics_comparison.json"
             save_json(path=Path(comparison_path), data=comparison)
             logger.info(f"Metrics comparison saved to {comparison_path}")
+
+    def _load_model_info(self) -> dict:
+        """Load model_info.json saved alongside the model by model_trainer."""
+        model_dir = self.config.model_path.parent
+        info_path = model_dir / "model_info.json"
+        if info_path.exists():
+            try:
+                with open(info_path) as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not read {info_path}: {e}")
+        else:
+            logger.warning(f"Model info not found at {info_path}")
+        return {}
 
     def _load_previous_metrics(self, registry_path: Path):
         """Load metrics from the previous production model."""
@@ -132,14 +169,3 @@ class ModelEvaluation:
                 pct_change = ((current[key] - previous[key]) / abs(previous[key])) * 100
                 comparison["changes"][key] = round(pct_change, 2)
         return comparison
-
-    def _update_registry_with_metrics(self, registry_path: Path, metrics: dict):
-        """Update the latest model version in the registry with computed metrics."""
-        try:
-            registry = load_registry(registry_path)
-            if registry["versions"]:
-                registry["versions"][0]["metrics"] = metrics
-                save_registry(registry_path, registry)
-                logger.info(f"Updated registry with metrics: {metrics}")
-        except Exception as e:
-            logger.warning(f"Could not update registry with metrics: {e}")

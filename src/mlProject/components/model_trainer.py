@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import os
 from mlProject import logger
@@ -10,6 +11,7 @@ from mlProject.utils.model_registry import (
     get_version_id, compute_file_hash, register_model,
 )
 from mlProject.components.data_transformation import NUMERIC_FEATURES
+
 
 class ModelTrainer:
     def __init__(self, config: ModelTrainerConfig):
@@ -126,9 +128,18 @@ class ModelTrainer:
             logger.error(f"Model registry rejected version {version_id}: {e}")
         except Exception as e:
             logger.warning(f"Failed to register model in registry: {e}")
-
         stable_path = os.path.join(self.config.root_dir, self.config.model_name)
         joblib.dump(unified_pipeline, stable_path)
+
+        model_info = {
+            "version_id": version_id,
+            "model_path": str(model_path),
+            "params": params,
+            "data_hash": data_hash or "",
+        }
+        model_info_path = os.path.join(self.config.root_dir, "model_info.json")
+        with open(model_info_path, "w") as f:
+            json.dump(model_info, f, indent=2)
 
         logger.info(f"Unified pipeline (preprocessor + model) {version_id} trained and saved to {stable_path}")
         logger.info(f"Train X shape: {train_x_preprocessed.shape}, Test X shape: {test_x_preprocessed.shape}")
