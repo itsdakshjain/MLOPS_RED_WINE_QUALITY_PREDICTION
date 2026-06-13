@@ -21,6 +21,7 @@ import functools
 import json
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import threading
@@ -69,6 +70,8 @@ _log_lock = threading.Lock()
 is_training = False
 training_log = deque(maxlen=100)
 _train_executor = ThreadPoolExecutor(max_workers=1)
+_training_process = None
+_training_process_lock = threading.Lock()
 TRAIN_TIMEOUT = int(os.environ.get("TRAIN_TIMEOUT", "1800"))  # default 30 min
 
 
@@ -165,24 +168,32 @@ def validate_config_at_startup() -> None:
 # ---------------------------------------------------------------------------
 def _run_training_in_background() -> None:
     """Subprocess-based training; releases _training_lock when done."""
-    global is_training
+    global is_training, _training_process
     start_time = time.time()
     try:
         with _log_lock:
             training_log.append("Training started...")
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["python", "main.py"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=TRAIN_TIMEOUT,
         )
+        with _training_process_lock:
+            _training_process = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=TRAIN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            raise
         with _log_lock:
-            if result.returncode == 0:
+            if proc.returncode == 0:
                 training_log.append("Training completed successfully!")
-                training_log.append(result.stdout)
+                training_log.append(stdout)
             else:
                 training_log.append("Training failed!")
-                training_log.append(result.stderr or result.stdout)
+                training_log.append(stderr or stdout)
     except subprocess.TimeoutExpired:
         with _log_lock:
             training_log.append(
@@ -193,6 +204,8 @@ def _run_training_in_background() -> None:
             training_log.append(f"Training error: {exc}")
     finally:
         is_training = False
+        with _training_process_lock:
+            _training_process = None
         try:
             _training_lock.release()
         except RuntimeError:
@@ -215,6 +228,7 @@ def ensure_model_trained() -> None:
                 ["python", "main.py"],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
             if result.returncode == 0:
                 print("Auto-training completed!")
@@ -406,7 +420,21 @@ def get_model_version(version_id):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+def _shutdown_handler(signum, frame):
+    """Clean up training subprocess on shutdown signals."""
+    print(f"Received signal {signum}, shutting down...")
+    global _training_process
+    with _training_process_lock:
+        if _training_process is not None:
+            print("Terminating training subprocess...")
+            _training_process.terminate()
+    sys.exit(0)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+    signal.signal(signal.SIGINT, _shutdown_handler)
+
     print("Starting Wine Quality Prediction App...")
     validate_config_at_startup()
     ensure_model_trained()

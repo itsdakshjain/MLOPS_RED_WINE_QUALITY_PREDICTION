@@ -12,6 +12,7 @@ class PredictionPipeline:
     def __init__(self, model_path: Path = None):
         self.unified_pipeline = None
         self._model_path = model_path
+        self._loaded_mtime = None
         if model_path is None:
             load_env_file()
             try:
@@ -25,13 +26,15 @@ class PredictionPipeline:
                 self._model_path = Path('artifacts/model_trainer/model.joblib')
 
     def predict(self, data):
-        if self.unified_pipeline is None:
-            model_path = self._model_path or Path('artifacts/model_trainer/model.joblib')
+        model_path = self._model_path or Path('artifacts/model_trainer/model.joblib')
+        current_mtime = model_path.stat().st_mtime if model_path.exists() else None
+        if self.unified_pipeline is None or (current_mtime and self._loaded_mtime != current_mtime):
             from mlProject.utils.common import verify_model_integrity
             checksum_path = Path(str(model_path) + ".sha256")
             if not verify_model_integrity(model_path, checksum_path):
                 raise ValueError(f"Model integrity check failed for {model_path}")
             self.unified_pipeline = joblib.load(model_path)
+            self._loaded_mtime = current_mtime
             logger.info(f"Loaded unified pipeline from {model_path}")
 
         # Convert input to appropriate format

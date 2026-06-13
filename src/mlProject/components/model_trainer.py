@@ -1,4 +1,5 @@
 import json
+import tempfile
 import pandas as pd
 import os
 from mlProject import logger
@@ -94,7 +95,10 @@ class ModelTrainer:
         model_filename = f"model_{version_id}.joblib"
         model_path_str = os.path.join(self.config.root_dir, model_filename)
         try:
-            joblib.dump(unified_pipeline, model_path_str)
+            with tempfile.NamedTemporaryFile(dir=self.config.root_dir, suffix='.joblib', delete=False) as tmp:
+                tmp_path = tmp.name
+                joblib.dump(unified_pipeline, tmp_path)
+            os.replace(tmp_path, model_path_str)
             checksum_path = model_path_str + ".sha256"
             from mlProject.utils.common import save_checksum
             save_checksum(Path(model_path_str), Path(checksum_path))
@@ -115,7 +119,10 @@ class ModelTrainer:
         }
 
         stable_path = os.path.join(self.config.root_dir, self.config.model_name)
-        joblib.dump(unified_pipeline, stable_path)
+        with tempfile.NamedTemporaryFile(dir=self.config.root_dir, suffix='.joblib', delete=False) as tmp:
+            stable_tmp_path = tmp.name
+            joblib.dump(unified_pipeline, stable_tmp_path)
+        os.replace(stable_tmp_path, stable_path)
 
         model_info = {
             "version_id": version_id,
