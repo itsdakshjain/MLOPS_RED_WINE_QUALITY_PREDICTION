@@ -45,15 +45,36 @@ class ModelEvaluation:
             logger.exception("Failed to load test data")
             raise
 
+        model_info = self._load_model_info()
+        version_id = model_info.get("version_id")
+        if not version_id:
+            raise ValueError(
+                "model_info.json is missing or incomplete (no version_id). "
+                "Run model training before evaluation."
+            )
+
+        versioned_model_path = model_info.get("model_path")
+        if not versioned_model_path:
+            raise ValueError(
+                "model_info.json is missing model_path. "
+                "Run model training before evaluation."
+            )
+
+        versioned_model_path = Path(versioned_model_path)
+        if not versioned_model_path.exists():
+            raise FileNotFoundError(
+                f"Versioned model file not found at {versioned_model_path}. "
+                f"Run model training before evaluation."
+            )
+
         try:
             from mlProject.utils.common import verify_model_integrity
-            model_path = self.config.model_path
-            checksum_path = Path(str(model_path) + ".sha256")
-            if not verify_model_integrity(model_path, checksum_path):
-                raise ValueError(f"Model integrity check failed for {model_path}")
-            model = joblib.load(model_path)
+            checksum_path = Path(str(versioned_model_path) + ".sha256")
+            if not verify_model_integrity(versioned_model_path, checksum_path):
+                raise ValueError(f"Model integrity check failed for {versioned_model_path}")
+            model = joblib.load(versioned_model_path)
         except FileNotFoundError:
-            logger.error(f"Model file not found: {self.config.model_path}")
+            logger.error(f"Model file not found: {versioned_model_path}")
             raise
         except Exception as e:
             logger.exception("Failed to load model")
@@ -108,21 +129,12 @@ class ModelEvaluation:
 
         registry_path = self.config.root_dir.parent / "model_registry.json"
 
-        model_info = self._load_model_info()
-        version_id = model_info.get("version_id") if model_info else None
-        if not version_id:
-            from mlProject.utils.model_registry import get_version_id
-            version_id = get_version_id()
-            logger.warning(f"Could not read version_id from model_info, generated new: {version_id}")
-
-        params = model_info.get("params", {}) if model_info else {}
-        data_hash = model_info.get("data_hash", "") if model_info else ""
-
-        versioned_model_path = model_info.get("model_path") if model_info else str(self.config.model_path)
+        params = model_info.get("params", {})
+        data_hash = model_info.get("data_hash", "")
 
         register_model(
             registry_path=registry_path,
-            model_path=Path(versioned_model_path),
+            model_path=versioned_model_path,
             version_id=version_id,
             metrics=scores,
             params=params,
@@ -143,12 +155,23 @@ class ModelEvaluation:
         if info_path.exists():
             try:
                 with open(info_path) as f:
-                    return json.load(f)
+                    info = json.load(f)
+                if not info.get("version_id") or not info.get("model_path"):
+                    raise ValueError(
+                        f"model_info.json at {info_path} is incomplete. "
+                        f"Required fields: version_id, model_path"
+                    )
+                return info
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Failed to parse model_info.json: {e}")
             except Exception as e:
-                logger.warning(f"Could not read {info_path}: {e}")
-        else:
-            logger.warning(f"Model info not found at {info_path}")
-        return {}
+                if isinstance(e, ValueError):
+                    raise
+                raise ValueError(f"Failed to read model_info.json: {e}")
+        raise FileNotFoundError(
+            f"Model info not found at {info_path}. "
+            f"Run model training before evaluation."
+        )
 
     def _load_previous_metrics(self, registry_path: Path):
         """Load metrics from the previous production model."""

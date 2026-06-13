@@ -1,10 +1,11 @@
 import json
 import os
 import hashlib
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from mlProject import logger
 
@@ -175,13 +176,51 @@ def get_staging_model_path(registry_path: Path) -> Optional[Path]:
 
 
 def rollback_to_version(registry_path: Path, version_id: str) -> bool:
-    """Rollback production alias to a specific version."""
+    """Rollback production alias to a specific version and restore the model file."""
     registry = load_registry(registry_path)
     for v in registry.get("versions", []):
         if v.get("id") == version_id:
+            versioned_path = Path(v["path"])
+            if not versioned_path.exists():
+                logger.error(
+                    f"Cannot rollback to version {version_id}: "
+                    f"model file not found at {versioned_path}"
+                )
+                return False
+            stable_path = versioned_path.parent / "model.joblib"
+            shutil.copy2(str(versioned_path), str(stable_path))
             registry["production"] = version_id
             save_registry(registry_path, registry)
-            logger.info(f"Rolled back production to version {version_id}")
+            logger.info(
+                f"Rolled back production to version {version_id}, "
+                f"restored model from {versioned_path} to {stable_path}"
+            )
             return True
     logger.error(f"Version {version_id} not found in registry")
     return False
+
+
+def validate_registry(registry_path: Path) -> List[str]:
+    """Check whether all registered versions have corresponding files on disk."""
+    registry = load_registry(registry_path)
+    issues = []
+    for v in registry.get("versions", []):
+        version_path = Path(v["path"])
+        if not version_path.exists():
+            issues.append(f"Missing model file for version {v['id']}: {v['path']}")
+        sha_path = Path(str(version_path) + ".sha256")
+        if not sha_path.exists():
+            issues.append(f"Missing checksum for version {v['id']}: {sha_path}")
+        if v.get("status") == "production":
+            production_path = version_path.parent / "model.joblib"
+            if not production_path.exists():
+                issues.append(
+                    f"Production model file missing at {production_path} "
+                    f"for version {v['id']}"
+                )
+    if issues:
+        for issue in issues:
+            logger.warning(f"Registry validation issue: {issue}")
+    else:
+        logger.info("Registry validation passed — all version files present")
+    return issues

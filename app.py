@@ -324,14 +324,14 @@ def compare_models():
 
 @app.route('/models/rollback', methods=['POST'])
 def rollback_model():
-    """Rollback production alias to a specified version."""
+    """Rollback production alias to a specified version and restore the model file."""
     version_id = request.json.get("version_id")
     if not version_id:
         return jsonify({"error": "version_id is required"}), 400
     registry_path = Path('artifacts/model_registry.json')
     if rollback_to_version(registry_path, version_id):
-        return jsonify({"message": f"Rolled back to version {version_id}"})
-    return jsonify({"error": f"Version {version_id} not found"}), 404
+        return jsonify({"message": f"Rolled back to version {version_id} and restored model file"})
+    return jsonify({"error": f"Rollback failed: version {version_id} not found or model file missing"}), 404
 
 
 @app.route('/models/<version_id>', methods=['GET'])
