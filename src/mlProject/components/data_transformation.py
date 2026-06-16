@@ -162,12 +162,12 @@ class DataTransformation:
 
         fe_flags = self.config.feature_engineering_flags or {}
         preprocessor = Pipeline(steps=[
-            ("numeric", numeric_transformer),
             ("feature_engineer", FeatureEngineer(
                 add_acidity_index=fe_flags.get("add_acidity_index", True),
                 add_alcohol_sugar_ratio=fe_flags.get("add_alcohol_sugar_ratio", True),
                 add_free_sulfur_pct=fe_flags.get("add_free_sulfur_pct", True),
             )),
+            ("numeric", numeric_transformer),
         ])
         return preprocessor
 
